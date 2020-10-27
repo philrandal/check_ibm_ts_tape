@@ -3,7 +3,7 @@
 # Script:       check_ibm_ts_tape.pl					#
 # Author:       Claudio Kuenzler www.claudiokuenzler.com		#
 # Purpose:      Monitor IBM System Storage TS Tape Libraries		#
-# Compatible:	TS3100, TS3200,TS3310					#
+# Compatible:	TS3100, TS3200, TS3310, TS4300				#
 # License: 	GPLv2							#
 # History:                                                              #
 # 20120316	Finished first version (my very first perl script, yay!)#
@@ -11,8 +11,9 @@
 # 20120901	Different approach to check for cleaning state		#
 # 20140826	Nick Jeffrey - add support for TS3310 			#
 # 20140826	Move all variable declaration to top -remove excess "my"#
+# 20201027	Phil Randal - add support for TS4300			#
 #########################################################################
-my $version = '20140826';
+my $version = '20201027';
 #########################################################################
 use strict;
 use Getopt::Long;
@@ -21,7 +22,7 @@ use Switch;
 #########################################################################
 # Variable Declaration
 my ($oid_base,$oid_hostname,$oid_uptime,$oid_productname,$oid_vendorname);
-my ($oid_productid,$oid_serialnumber,$oid_firmware,$oid_globalstatus);
+my ($oid_productid,$oid_serialnumber,$oid_firmware,$oid_globalstatus,$oid_status1,$oid_status2);
 my ($oid_drivenumber,$oid_cartridges,$oid_faulterror);
 my ($oid_faultseverity,$oid_faultdesc,$oid_cleanstate);
 my ($oid_online_p,$oid_online_l,$oid_iodoor,$oid_driveonline,$oid_robotonline);
@@ -40,7 +41,7 @@ my $productid = '';
 my $serialnumber = '';
 my $firmware = '';
 my (@oidlist,$result);
-my ($globalstatus,$faulterror,$faultdesc);
+my ($globalstatus,$faulterror,$faultdesc,$status1,$status2);
 my (%value,$key,$drivestoclean);
 #########################################################################
 # User Input
@@ -65,8 +66,8 @@ if ( $community eq '' ) {
 }
 
 # Check if model was set
-if ( ($model ne "ts3100") && ($model ne "ts3200") && ($model ne "ts3310") ) {
-	print "Model must be either ts3100 or ts3200 or ts3310.\n";
+if ( ($model ne "ts3100") && ($model ne "ts3200") && ($model ne "ts3310") && ($model ne "ts4300") ) {
+	print "Model must be either ts3100 or ts3200 or ts3310 or ts4300.\n";
 	exit 2;
 }
 #########################################################################
@@ -88,7 +89,7 @@ if ( $model eq "ts3100" ) {
         $oid_faultdesc     = "$oid_base.3.1.1.24.1";
         $oid_cleanstate    = "$oid_base.3.2.1.2"; 
 }
-if ( $model eq "ts3100" ) {
+if ( $model eq "ts3200" ) {
 	$oid_base             = '.1.3.6.1.4.1.2.6.211';		#unique OID for ts3200
         $oid_hostname      = ".1.3.6.1.2.1.1.5.0";
         $oid_uptime        = ".1.3.6.1.2.1.1.3.0";
@@ -127,6 +128,30 @@ if ( $model eq "ts3310" ) {
         #$oid_driveonline  = "$oid_base.11.3.1.10"; 		# tape drives online/offline 1=online 2=offline
         #$oid_robotonline  = "$oid_base.14.30.2.0"; 		# robotic arm ready 1=ready 0=?
 }
+if ( $model eq "ts4300" ) {
+        $oid_base = '.1.3.6.1.4.1.14851.3.1';                   #unique OID for ts4300
+        $oid_hostname      = ".1.3.6.1.2.1.1.5.0";
+        $oid_uptime        = ".1.3.6.1.2.1.1.3.0";
+        $oid_productname   = "$oid_base.5.1.0";
+        $oid_vendorname    = "$oid_base.3.3.0";
+        $oid_productid     = "$oid_base.3.1.0";
+        $oid_serialnumber  = "$oid_base.3.2.0";
+        $oid_firmware      = "$oid_base.3.4.0";
+        $oid_status1	   = "$oid_base.4.10.1.10.1";           # library1 status 0=unknown, 1=other, 2=ok, 3=degraded, 4=stressed, 5=pred fail, 6=error
+	$oid_status2	   = "$oid_base.4.10.1.10.2";		# library1 status 0=unknown, 1=other, 2=ok, 3=degraded, 4=stressed, 5=pred fail, 6=error
+        $oid_drivenumber   = "$oid_base.6.1.0";                 #not used anywhere else in this script
+        $oid_cartridges    = "$oid_base.13.2.0";                #not used anywhere else in this script
+        $oid_faulterror    = "$oid_base.11.1.0";                #OID not used for this model.  Dummy in overallPhDriveReadinessStatus  1=online
+        $oid_faultseverity = "$oid_base.11.1.0";                #OID not used for this model.  Dummy in overallPhDriveReadinessStatus  1=online
+        $oid_faultdesc     = "$oid_base.11.1.0";                #OID not used for this model.  Dummy in overallPhDriveReadinessStatus  1=online
+        $oid_cleanstate    = "$oid_base.6.2.1.6";               # CleaningStatus 1=required 2=notRequired 3=immediate
+        #$oid_online_p     = "$oid_base.14.1.0";                # physical library 1=online 0=offline
+        #$oid_online_l     = "$oid_base.13.2.1.8";              # logical library 1=online 0=offline  (may be multiple logical libraries)
+        #$oid_iodoor       = "$oid_base.14.3.0";                # I/O station door   1=opened 2=closedAndLocked 3=closedAndUnLocked
+        #$oid_driveonline  = "$oid_base.11.3.1.10";             # tape drives online/offline 1=online 2=offline
+        #$oid_robotonline  = "$oid_base.14.30.2.0";             # robotic arm ready 1=ready 0=?
+}
+
 #########################################################################
 # Subs
 sub help {
@@ -136,7 +161,7 @@ Usage: ./check_ibm_ts_tape.pl -H host [-C community] -m model -t checktype\n
 Options: 
 -H\tHostname or IP address of tape library.
 -C\tSNMP community name (if not set, public will be used).
--m\tModel of the tape library. Must be either ts3100 or ts3200.
+-m\tModel of the tape library. Must be either ts3100, ts3200, ts3310, or ts4300.
 -t\tType to check. See below for valid types.
 --help\tShow this help/usage.\n
 Check Types:
@@ -155,7 +180,11 @@ clean  -> Checks all drives of tape library if cleaning is required\n";
 # Plugin Checks
 switch ($type) {
 case "info" {
-	@oidlist = ($oid_hostname, $oid_productname, $oid_vendorname, $oid_productid, $oid_serialnumber, $oid_firmware);
+	if ($model eq "ts4300") {
+        	@oidlist = ($oid_productname, $oid_vendorname, $oid_productid, $oid_serialnumber, $oid_firmware);
+	} else {
+		@oidlist = ($oid_hostname, $oid_productname, $oid_vendorname, $oid_productid, $oid_serialnumber, $oid_firmware);
+	}
 	$result = $session->get_request(-varbindlist => \@oidlist);
 	
 	if (!defined($result)) {
@@ -167,7 +196,9 @@ case "info" {
 		exit 2;
 	}
 
-	$hostname = $$result{$oid_hostname};
+	if ($model ne "ts4300") {
+		$hostname = $$result{$oid_hostname};
+	}
 	$vendorname = $$result{$oid_vendorname};
 	$vendorname =~ s/\s+$//;
 	$productname = $$result{$oid_productname};
@@ -180,7 +211,11 @@ case "info" {
 	exit 0;
 }
 case "status" {
-	@oidlist = ($oid_globalstatus, $oid_faulterror, $oid_faultdesc);
+	if ($model eq "ts4300") {
+		@oidlist = ($oid_status1, $oid_status2);
+	} else {
+                @oidlist = ($oid_globalstatus, $oid_faulterror, $oid_faultdesc);
+	}
 	$result = $session->get_request(-varbindlist => \@oidlist);
         
 	if (!defined($result)) {
@@ -190,6 +225,15 @@ case "status" {
                 }
                 $session->close;
                 exit 2;
+        }
+        if ( $model eq "ts4300" ) {
+	    $status1 = $$result{$oid_status1};
+            $status2 = $$result{$oid_status2};
+	    if ( ($status1 eq 2) && ($status2 eq 2) ) {
+                print "$model OK - Current status is: ok\n"; exit 0;
+            } else {
+                print "$model UNKNOWN - Unknown status code\n"; exit 2;
+            }
         }
 
 	$globalstatus = $$result{$oid_globalstatus};
