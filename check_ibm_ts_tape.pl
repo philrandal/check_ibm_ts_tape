@@ -219,22 +219,24 @@ case "status" {
 	$result = $session->get_request(-varbindlist => \@oidlist);
         
 	if (!defined($result)) {
-                printf("ERROR: Description table : %s.\n", $session->error);
-                if ($session->error =~ m/noSuchName/ || $session->error =~ m/does not exist/) {
-                        print "Are you really sure the target host is a $model???!\n";
-                }
-                $session->close;
-                exit 2;
+        printf("ERROR: Description table : %s.\n", $session->error);
+        if ($session->error =~ m/noSuchName/ || $session->error =~ m/does not exist/) {
+            print "Are you really sure the target host is a $model???!\n";
         }
-        if ( $model eq "ts4300" ) {
+        $session->close;
+        exit 2;
+    }
+    if ( $model eq "ts4300" ) {
 	    $status1 = $$result{$oid_status1};
-            $status2 = $$result{$oid_status2};
+        $status2 = $$result{$oid_status2};
 	    if ( ($status1 eq 2) && ($status2 eq 2) ) {
-                print "$model OK - Current status is: ok\n"; exit 0;
-            } else {
-                print "$model UNKNOWN - Unknown status code\n"; exit 2;
-            }
-        }
+            print "$model OK - Current status is: ok\n"; exit 0;
+        } elsif ( ($status1 eq 6) || ($status2 eq 6) ) {
+            print "$model CRITICAL - Current status is critical\n"; exit 2;
+	    } else {
+		    print "$model UNKNOWN - Unknown status code\n"; exit 3;
+		}
+    }
 
 	$globalstatus = $$result{$oid_globalstatus};
 	$faulterror = $$result{$oid_faulterror};
