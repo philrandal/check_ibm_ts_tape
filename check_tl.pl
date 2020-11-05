@@ -1,19 +1,20 @@
 #!/usr/bin/perl -w
 #########################################################################
-# Script:       check_ibm_ts_tape.pl					#
-# Author:       Claudio Kuenzler www.claudiokuenzler.com		#
-# Purpose:      Monitor IBM System Storage TS Tape Libraries		#
-# Compatible:	TS3100, TS3200, TS3310, TS4300				#
-# License: 	GPLv2							#
-# History:                                                              #
-# 20120316	Finished first version (my very first perl script, yay!)#
-# 20120822	Tape Drive needs cleaning with different code (22)	#
-# 20120901	Different approach to check for cleaning state		#
-# 20140826	Nick Jeffrey - add support for TS3310 			#
-# 20140826	Move all variable declaration to top -remove excess "my"#
-# 20201027	Phil Randal - add support for TS4300			#
+# Script:       check_tl.pl (formerly check_ibm_ts_tape.pl)
+# Author:       Claudio Kuenzler www.claudiokuenzler.com
+# Purpose:      Monitor IBM System Storage TS Tape Libraries
+# Compatible:	TS3100, TS3200, TS3310, TS4300 and Dell TL4000
+# License: 	GPLv2
+# History:
+# 20120316	Finished first version (my very first perl script, yay!)
+# 20120822	Tape Drive needs cleaning with different code (22)
+# 20120901	Different approach to check for cleaning state
+# 20140826	Nick Jeffrey - add support for TS3310
+# 20140826	Move all variable declaration to top -remove excess "my"
+# 20201027	Phil Randal - add support for TS4300
+# 20201105  Phil Randal - add support for Dell tl4000
 #########################################################################
-my $version = '20201027';
+my $version = '20201105';
 #########################################################################
 use strict;
 use Getopt::Long;
@@ -21,8 +22,8 @@ use Net::SNMP;
 use Switch;
 #########################################################################
 # Variable Declaration
-my ($oid_base,$oid_hostname,$oid_uptime,$oid_productname,$oid_vendorname);
-my ($oid_productid,$oid_serialnumber,$oid_firmware,$oid_globalstatus,$oid_status1,$oid_status2);
+my ($oid_base,$oid_hostname,$oid_uptime,$oid_productname,$oid_vendorname,$oid_description);
+my ($oid_productid,$oid_serialnumber,$oid_firmware,$oid_globalstatus,$oid_status1,$oid_status2,$oid_delltag);
 my ($oid_drivenumber,$oid_cartridges,$oid_faulterror);
 my ($oid_faultseverity,$oid_faultdesc,$oid_cleanstate);
 my ($oid_online_p,$oid_online_l,$oid_iodoor,$oid_driveonline,$oid_robotonline);
@@ -37,6 +38,7 @@ my $session = '';
 my $error = '';
 my $vendorname = '';
 my $productname = '';
+my $productdesc='';
 my $productid = '';
 my $serialnumber = '';
 my $firmware = '';
@@ -66,12 +68,31 @@ if ( $community eq '' ) {
 }
 
 # Check if model was set
-if ( ($model ne "ts3100") && ($model ne "ts3200") && ($model ne "ts3310") && ($model ne "ts4300") ) {
-	print "Model must be either ts3100 or ts3200 or ts3310 or ts4300.\n";
+if ( ($model ne "tl4000") && ($model ne "ts3100") && ($model ne "ts3200") && ($model ne "ts3310") && ($model ne "ts4300") ) {
+	print "Model must be either tl4000 or ts3100 or ts3200 or ts3310 or ts4300.\n";
 	exit 2;
 }
 #########################################################################
 # OID Definition
+if ( $model eq "tl4000" ) {
+	$oid_base = '.1.3.6.1.4.1.674.10893.2.102';	# unique oid for Dell tl4000
+	$oid_hostname = ".1.3.6.1.2.1.1.5.0";
+	$oid_uptime = ".1.3.6.1.2.1.1.3.0";
+	$oid_productname = "$oid_base.1.1.0";
+	$oid_description = "$oid_base.1.2.0";
+	$oid_vendorname = "$oid_base.1.3.0";
+	$oid_productid = "$oid_base.3.1.1.8.1";
+	#$oid_serialnumber = "$oid_base.3.1.1.10.1";
+	$oid_firmware = "$oid_base.3.1.1.9.1";
+	$oid_globalstatus = "$oid_base.2.1.0";
+	$oid_drivenumber = "$oid_base.3.1.1.11.1";
+	$oid_cartridges = "$oid_base.3.1.1.12.1";
+	$oid_faulterror = "$oid_base.3.1.1.22.1";
+	$oid_faultseverity = "$oid_base.3.1.1.23.1";
+	$oid_faultdesc = "$oid_base.3.1.1.24.1";
+	$oid_delltag = "$oid_base.3.1.1.25.1";
+	$oid_cleanstate = "$oid_base.3.2.1.2";	
+}
 if ( $model eq "ts3100" ) {
 	$oid_base             = '.1.3.6.1.4.1.2.6.210';		#unique OID for ts3100
         $oid_hostname      = ".1.3.6.1.2.1.1.5.0";
@@ -155,13 +176,13 @@ if ( $model eq "ts4300" ) {
 #########################################################################
 # Subs
 sub help {
-print "check_ibm_ts_tape.pl (c) 2012 Claudio Kuenzler (published under GPL License)
+print "check_tl.pl (c) 2012 Claudio Kuenzler (published under GPL License)
 Version: $version\n
-Usage: ./check_ibm_ts_tape.pl -H host [-C community] -m model -t checktype\n
+Usage: ./check_tl.pl -H host [-C community] -m model -t checktype\n
 Options: 
 -H\tHostname or IP address of tape library.
 -C\tSNMP community name (if not set, public will be used).
--m\tModel of the tape library. Must be either ts3100, ts3200, ts3310, or ts4300.
+-m\tModel of the tape library. Must be either tl4000, ts3100, ts3200, ts3310, or ts4300.
 -t\tType to check. See below for valid types.
 --help\tShow this help/usage.\n
 Check Types:
@@ -182,8 +203,10 @@ switch ($type) {
 case "info" {
 	if ($model eq "ts4300") {
         	@oidlist = ($oid_productname, $oid_vendorname, $oid_productid, $oid_serialnumber, $oid_firmware);
+	} elsif ($model eq "tl4000") {
+		    @oidlist = ($oid_hostname, $oid_productname, $oid_vendorname, $oid_productid, $oid_description, $oid_delltag, $oid_firmware);	
 	} else {
-		@oidlist = ($oid_hostname, $oid_productname, $oid_vendorname, $oid_productid, $oid_serialnumber, $oid_firmware);
+			@oidlist = ($oid_hostname, $oid_productname, $oid_vendorname, $oid_productid, $oid_serialnumber, $oid_firmware);
 	}
 	$result = $session->get_request(-varbindlist => \@oidlist);
 	
@@ -204,10 +227,16 @@ case "info" {
 	$productname = $$result{$oid_productname};
 	$productid = $$result{$oid_productid};
 	$productid =~ s/\s+$//;
-	$serialnumber = $$result{$oid_serialnumber};
+	if ($model eq "tl4000") {
+                $serialnumber = $$result{$oid_delltag};
+                $productdesc = $$result{$oid_description};
+	} else {
+		$serialnumber = $$result{$oid_serialnumber};
+		$productdesc = $productname;
+	}
 	$firmware = $$result{$oid_firmware};
 
-	print "$hostname ($vendorname $productname) - Product-No: $productid - S/N: $serialnumber - running on Firmware $firmware\n";
+	print "$hostname ($vendorname $productdesc) - Product-No: $productid - S/N: $serialnumber - running on Firmware $firmware\n";
 	exit 0;
 }
 case "status" {
@@ -219,30 +248,30 @@ case "status" {
 	$result = $session->get_request(-varbindlist => \@oidlist);
         
 	if (!defined($result)) {
-            printf("ERROR: Description table : %s.\n", $session->error);
-            if ($session->error =~ m/noSuchName/ || $session->error =~ m/does not exist/) {
-                print "Are you really sure the target host is a $model???!\n";
-            }
-            $session->close;
-            exit 2;
+        printf("ERROR: Description table : %s.\n", $session->error);
+        if ($session->error =~ m/noSuchName/ || $session->error =~ m/does not exist/) {
+            print "Are you really sure the target host is a $model???!\n";
         }
-        if ( $model eq "ts4300" ) {
+        $session->close;
+        exit 2;
+    }
+    if ( $model eq "ts4300" ) {
 	    $status1 = $$result{$oid_status1};
-	    $status2 = $$result{$oid_status2};
+        $status2 = $$result{$oid_status2};
 	    if ( ($status1 eq 2) && ($status2 eq 2) ) {
-            	print "$model OK - Current status is: ok\n"; exit 0;
-	    } elsif ( ($status1 eq 6) || ($status2 eq 6) ) {
-	    	print "$model CRITICAL - Current status is critical\n"; exit 2;
+            print "$model OK - Current status is: ok\n"; exit 0;
+        } elsif ( ($status1 eq 6) || ($status2 eq 6) ) {
+            print "$model CRITICAL - Current status is critical\n"; exit 2;
 	    } else {
-		print "$model UNKNOWN - Unknown status code\n"; exit 3;
-	    }
-        }
+		    print "$model UNKNOWN - Unknown status code\n"; exit 3;
+		}
+    }
 
 	$globalstatus = $$result{$oid_globalstatus};
 	$faulterror = $$result{$oid_faulterror};
 	$faultdesc = $$result{$oid_faultdesc};
 
-        if ( ($model eq "ts3100") || ($model eq "ts3200") ) {
+        if ( ($model eq "tl4000") || ($model eq "ts3100") || ($model eq "ts3200") ) {
 	    switch ($globalstatus) {
 		case 1 { print "$model WARNING - Current status is: other - $faultdesc (error code: $faulterror)\n"; exit 1; }
 		case 2 { print "$model WARNING - Current status is: unknown - $faultdesc (error code: $faulterror)\n"; exit 1; }
