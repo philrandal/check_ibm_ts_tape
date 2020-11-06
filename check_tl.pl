@@ -12,7 +12,7 @@
 # 20140826	Nick Jeffrey - add support for TS3310
 # 20140826	Move all variable declaration to top -remove excess "my"
 # 20201027	Phil Randal - add support for TS4300
-# 20201105  Phil Randal - add support for Dell tl4000
+# 20201105	Phil Randal - add support for Dell tl4000
 #########################################################################
 my $version = '20201105';
 #########################################################################
@@ -23,7 +23,7 @@ use Switch;
 #########################################################################
 # Variable Declaration
 my ($oid_base,$oid_hostname,$oid_uptime,$oid_productname,$oid_vendorname,$oid_description);
-my ($oid_productid,$oid_serialnumber,$oid_firmware,$oid_globalstatus,$oid_status1,$oid_status2,$oid_delltag);
+my ($oid_productid,$oid_serialnumber,$oid_firmware,$oid_globalstatus,$oid_status1,$oid_status2);
 my ($oid_drivenumber,$oid_cartridges,$oid_faulterror);
 my ($oid_faultseverity,$oid_faultdesc,$oid_cleanstate);
 my ($oid_online_p,$oid_online_l,$oid_iodoor,$oid_driveonline,$oid_robotonline);
@@ -90,7 +90,8 @@ if ( $model eq "tl4000" ) {
 	$oid_faulterror = "$oid_base.3.1.1.22.1";
 	$oid_faultseverity = "$oid_base.3.1.1.23.1";
 	$oid_faultdesc = "$oid_base.3.1.1.24.1";
-	$oid_delltag = "$oid_base.3.1.1.25.1";
+	#$oid_delltag = "$oid_base.3.1.1.25.1";
+	$oid_serialnumber = "$oid_base.3.1.1.25.1";
 	$oid_cleanstate = "$oid_base.3.2.1.2";	
 }
 if ( $model eq "ts3100" ) {
@@ -202,11 +203,11 @@ clean  -> Checks all drives of tape library if cleaning is required\n";
 switch ($type) {
 case "info" {
 	if ($model eq "ts4300") {
-        	@oidlist = ($oid_productname, $oid_vendorname, $oid_productid, $oid_serialnumber, $oid_firmware);
+		@oidlist = ($oid_productname, $oid_vendorname, $oid_productid, $oid_serialnumber, $oid_firmware);
 	} elsif ($model eq "tl4000") {
-		    @oidlist = ($oid_hostname, $oid_productname, $oid_vendorname, $oid_productid, $oid_description, $oid_delltag, $oid_firmware);	
-	} else {
-			@oidlist = ($oid_hostname, $oid_productname, $oid_vendorname, $oid_productid, $oid_serialnumber, $oid_firmware);
+		@oidlist = ($oid_hostname, $oid_productname, $oid_vendorname, $oid_productid, $oid_description, $oid_serialnumber, $oid_firmware);
+   	} else {
+		@oidlist = ($oid_hostname, $oid_productname, $oid_vendorname, $oid_productid, $oid_serialnumber, $oid_firmware);
 	}
 	$result = $session->get_request(-varbindlist => \@oidlist);
 	
@@ -227,11 +228,10 @@ case "info" {
 	$productname = $$result{$oid_productname};
 	$productid = $$result{$oid_productid};
 	$productid =~ s/\s+$//;
+        $serialnumber = $$result{$oid_serialnumber};
 	if ($model eq "tl4000") {
-                $serialnumber = $$result{$oid_delltag};
-                $productdesc = $$result{$oid_description};
+		$productdesc = $$result{$oid_description};
 	} else {
-		$serialnumber = $$result{$oid_serialnumber};
 		$productdesc = $productname;
 	}
 	$firmware = $$result{$oid_firmware};
